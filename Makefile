@@ -1,4 +1,5 @@
 SERIAL=/dev/ttyACM0
+#SERIAL=/dev/ttyUSB0
 include credentials.vars
 
 check_credentials:

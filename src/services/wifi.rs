@@ -9,8 +9,17 @@ use esp_idf_hal::peripheral;
 use std::time::Duration;
 use anyhow::Result;
 
-const SSID: &str = env!("RUST_ESP32_STD_DEMO_WIFI_SSID");
-const PASS: &str = env!("RUST_ESP32_STD_DEMO_WIFI_PASS");
+struct Config {
+  ssid: &'static str,
+  password: &'static str,
+  channel: Option<u8>
+}
+
+static config: Config = Config {
+  ssid: env!("RUST_ESP32_STD_DEMO_WIFI_SSID"),
+  password: env!("RUST_ESP32_STD_DEMO_WIFI_PASS"),
+  channel: Some(1)
+};
 
 pub fn start(
   modem: impl peripheral::Peripheral<P = esp_idf_hal::modem::Modem> + 'static,
@@ -21,39 +30,44 @@ pub fn start(
   use esp_idf_svc::handle::RawHandle;
 
   let mut wifi = Box::new(EspWifi::new(modem, sysloop.clone(), None)?);
-
   info!("Wifi created, about to scan");
+  info!("MAC: {:?}", wifi.sta_netif().get_mac());
 
   let ap_infos = wifi.scan()?;
 
-  let ours = ap_infos.into_iter().find(|a| a.ssid == SSID);
+  let ours = ap_infos.into_iter().find(|a| a.ssid == config.ssid);
 
-  let channel = if let Some(ours) = ours {
-      info!(
-          "Found configured access point {} on channel {}",
-          SSID, ours.channel
-      );
-      Some(ours.channel)
-  } else {
-      info!(
-          "Configured access point {} not found during scanning, will go with unknown channel",
-          SSID
-      );
-      None
+  let net = match ours {
+      Some(net) => net,
+      None => {
+        
+          error!(
+            "Configured access point {} not found during scanning", config.ssid
+          );
+          bail!(
+            "Configured access point {} not found during scanning", config.ssid
+          )
+      }
   };
 
-  wifi.set_configuration(&Configuration::Mixed(
+  let channel = Some(config.channel.unwrap_or(net.channel));
+//   let auth_method = net.auth_method;
+  info!(
+    "Found configured access point {} on channel {}",
+    config.ssid, net.channel);
+
+  wifi.set_configuration(&Configuration::Client(
       ClientConfiguration {
-          ssid: SSID.into(),
-          password: PASS.into(),
-          channel,
+          ssid: config.ssid.into(),
+          password: config.password.into(),
           ..Default::default()
       },
-      AccessPointConfiguration {
-          ssid: "aptest".into(),
-          channel: channel.unwrap_or(1),
-          ..Default::default()
-      },
+
+    //   AccessPointConfiguration {
+    //       ssid: "aptest".into(),
+    //       channel: channel.unwrap_or(1),
+    //       ..Default::default()
+    //   },
   ))?;
 
   wifi.start()?;
@@ -83,8 +97,6 @@ pub fn start(
   let ip_info = wifi.sta_netif().get_ip_info()?;
 
   info!("Wifi DHCP info: {:?}", ip_info);
-
-  // ping(ip_info.subnet.gateway)?;
 
   Ok(wifi)
 }
